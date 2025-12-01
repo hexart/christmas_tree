@@ -447,7 +447,7 @@ def generate_ragged_tree(num_particles: int) -> List[Particle]:
             size = random.uniform(0.6, 2.0)  # 默认大小
 
         # 最外层突出的雪花效果
-        if turbulence_scale > 1.4:
+        if turbulence_scale > 2.8:
             if random.random() < 0.88:  # 88%是白色雪花
                 color = Config.WHITE
                 is_snow_particle = True
@@ -486,7 +486,7 @@ def generate_ragged_tree(num_particles: int) -> List[Particle]:
     for i in range(num_snow_layer):
         # 垂直分布
         h_norm = random.random()
-        h_dist = math.pow(h_norm, 0.75)
+        h_dist = math.pow(h_norm, 0.25)
         y = -tree_height * 0.58 + h_dist * tree_height
         y += random.uniform(-6, 6)
 
@@ -530,7 +530,7 @@ def generate_bright_white_ground(num_particles: int) -> List[Particle]:
     """生成波纹地面的粒子"""
     particles = []
     ground_y = 240
-    max_dist = 1400  # 从950增加到1400，覆盖更大面积
+    max_dist = 1400
 
     for _ in range(num_particles):
         # 径向分布 - 使用更平滑的分布减少边缘锐利感
@@ -567,11 +567,11 @@ def generate_snow(num_particles: int) -> List[Particle]:
     """生成飘落的雪花粒子"""
     particles = []
     for _ in range(num_particles):
-        x = random.uniform(-500, 500)
-        y = random.uniform(-500, 300)
-        z = random.uniform(-500, 500)
+        x = random.uniform(-500, 1200)
+        y = random.uniform(-500, 500)
+        z = random.uniform(-500, 1200)
         p = Particle(x, y, z, Config.WHITE, random.uniform(0.8, 1.8))
-        p.fall_speed = random.uniform(0.2, 0.6)
+        p.fall_speed = random.uniform(0.2, 1.8)
         particles.append(p)
     return particles
 
