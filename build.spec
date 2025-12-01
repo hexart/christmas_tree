@@ -141,8 +141,8 @@ else:
     )
 
 print("=" * 60)
-print(f"平台: {'Windows' if IS_WINDOWS else 'macOS' if IS_MACOS else 'Linux'}")
-print(f"模式: {'屏保' if IS_SCREENSAVER else '普通应用'}")
-print(f"入口: {entry_script}")
-print(f"输出: {app_name}")
+print(f"Platform: {'Windows' if IS_WINDOWS else 'macOS' if IS_MACOS else 'Linux'}")
+print(f"Mode: {'Screensaver' if IS_SCREENSAVER else 'Application'}")
+print(f"Entry: {entry_script}")
+print(f"Output: {app_name}")
 print("=" * 60)
