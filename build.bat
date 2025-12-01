@@ -13,9 +13,10 @@ echo.
 echo Please select build type:
 echo 1. Build executable (main.py)
 echo 2. Build screensaver (screensaver.py)
+echo 3. Clean all builds
 echo 0. Exit
 echo.
-set /p choice="Enter your choice (0/1/2): "
+set /p choice="Enter your choice (0/1/2/3): "
 
 if "%choice%"=="0" (
     echo Exiting...
@@ -28,9 +29,11 @@ if "%choice%"=="0" (
     set BUILD_SCREENSAVER=1
     set BUILD_TYPE=Screensaver
     goto build
+) else if "%choice%"=="3" (
+    goto clean_all
 ) else (
     echo.
-    echo Invalid choice. Please select 0, 1, or 2.
+    echo Invalid choice. Please select 0, 1, 2, or 3.
     timeout /t 2 >nul
     goto menu
 )
@@ -56,9 +59,15 @@ if not exist ".venv\Scripts\activate.bat" (
 REM Activate virtual environment
 call .venv\Scripts\activate.bat
 
-echo Step 1/3: Cleaning old files...
-if exist "dist" rmdir /s /q dist
-if exist "build" rmdir /s /q build
+echo Step 1/3: Preparing build...
+REM Only clean on first build to preserve previous builds
+if "%FIRST_BUILD%"=="" (
+    echo Cleaning old build cache...
+    if exist "build" rmdir /s /q build
+    set FIRST_BUILD=done
+) else (
+    echo Skipping cache cleanup to preserve previous builds...
+)
 
 echo Step 2/3: Building with PyInstaller...
 pyinstaller build.spec --clean
@@ -150,6 +159,25 @@ cd ..\..
 goto complete
 
 :complete
+echo.
+echo Press any key to return to menu...
+pause >nul
+goto menu
+
+:clean_all
+echo.
+echo Cleaning all build files...
+if exist "dist" (
+    rmdir /s /q dist
+    echo - Deleted dist folder
+)
+if exist "build" (
+    rmdir /s /q build
+    echo - Deleted build folder
+)
+set FIRST_BUILD=
+echo.
+echo Clean completed!
 echo.
 echo Press any key to return to menu...
 pause >nul
