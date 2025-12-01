@@ -30,11 +30,14 @@ if sys.platform == 'win32':
 class Config:
     """应用程序配置常量"""
     # 显示设置
-    WIDTH = 1440
-    HEIGHT = 900
+    VIRTUAL_WIDTH = 1920   # 虚拟分辨率宽度（设计基准）
+    VIRTUAL_HEIGHT = 1080   # 虚拟分辨率高度（设计基准）
+    WIDTH = VIRTUAL_WIDTH  # 实际窗口宽度（全屏时会更新）
+    HEIGHT = VIRTUAL_HEIGHT  # 实际窗口高度（全屏时会更新）
     FPS = 60
     WINDOW_TITLE = "Merry Christmas Tree"
     AUTO_FULLSCREEN = True  # 设置为True可启动时自动全屏
+    MAINTAIN_ASPECT_RATIO = True  # 保持宽高比，避免拉伸变形
 
     # 颜色定义
     BG_COLOR = (25, 28, 35)
@@ -50,7 +53,7 @@ class Config:
     GROUND_BASE_COLOR = (225, 225, 230)
 
     # 粒子数量
-    TREE_PARTICLES = 6000
+    TREE_PARTICLES = 10000  # 从6000增加到10000
     HEART_PARTICLES = 2000
     GROUND_PARTICLES = 12000
     SNOW_PARTICLES = 600
@@ -82,12 +85,17 @@ class Config:
     LINE_SPACING = 15  # 行间距
     SHADOW_OFFSET = (2, 2)
 
+    # 音乐配置
+    MUSIC_FILE = "music.mp3"
+    DEFAULT_VOLUME = 0.5  # 默认音量 50%
+
 
 # ============================================================================
 # 初始化
 # ============================================================================
 
 pygame.init()
+pygame.mixer.init()  # 初始化音频混音器
 
 # 根据配置决定是否全屏
 if Config.AUTO_FULLSCREEN:
@@ -99,6 +107,50 @@ else:
 
 pygame.display.set_caption(Config.WINDOW_TITLE)
 clock = pygame.time.Clock()
+
+# 加载背景音乐
+def get_resource_path(relative_path):
+    """获取资源文件的绝对路径（支持打包后的环境）"""
+    try:
+        # PyInstaller 创建临时文件夹，路径存储在 _MEIPASS 中
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
+
+try:
+    music_path = get_resource_path(Config.MUSIC_FILE)
+    pygame.mixer.music.load(music_path)
+    pygame.mixer.music.set_volume(Config.DEFAULT_VOLUME)
+    pygame.mixer.music.play(-1)  # -1 表示循环播放
+    print(f"Background music loaded: {music_path}")
+except Exception as e:
+    print(f"Failed to load music: {e}")
+
+# 创建虚拟渲染表面（固定分辨率）
+virtual_surface = pygame.Surface((Config.VIRTUAL_WIDTH, Config.VIRTUAL_HEIGHT))
+
+# 计算缩放和偏移以保持宽高比
+def calculate_scaling():
+    """计算虚拟表面到实际屏幕的缩放参数"""
+    if Config.MAINTAIN_ASPECT_RATIO:
+        # 保持宽高比，可能出现黑边
+        scale_x = Config.WIDTH / Config.VIRTUAL_WIDTH
+        scale_y = Config.HEIGHT / Config.VIRTUAL_HEIGHT
+        scale = min(scale_x, scale_y)
+
+        scaled_width = int(Config.VIRTUAL_WIDTH * scale)
+        scaled_height = int(Config.VIRTUAL_HEIGHT * scale)
+
+        offset_x = (Config.WIDTH - scaled_width) // 2
+        offset_y = (Config.HEIGHT - scaled_height) // 2
+
+        return scaled_width, scaled_height, offset_x, offset_y
+    else:
+        # 拉伸填充整个屏幕，可能变形
+        return Config.WIDTH, Config.HEIGHT, 0, 0
+
+scaled_width, scaled_height, offset_x, offset_y = calculate_scaling()
 
 
 def load_font(size: int) -> pygame.font.Font:
@@ -164,9 +216,9 @@ class Particle:
 
     def _project_to_2d(self, scale: float) -> Tuple[int, int]:
         """将3D位置投影到2D屏幕坐标"""
-        center_offset_x = int(Config.WIDTH * 0.6)
+        center_offset_x = int(Config.VIRTUAL_WIDTH * 0.6)
         x_2d = int(self.x * scale + center_offset_x)
-        y_2d = int(self.y * scale + Config.HEIGHT // 2 + 100)
+        y_2d = int(self.y * scale + Config.VIRTUAL_HEIGHT // 2 + 100)
         return (x_2d, y_2d)
 
     def _draw_glow(self, surface: pygame.Surface, x: int, y: int, size: int, fog_factor: float, color: Tuple[int, int, int]) -> None:
@@ -231,8 +283,9 @@ def generate_ragged_tree(num_particles: int) -> List[Particle]:
         layer_profile_scale = 0.35 + 0.65 * wave_factor
         current_layer_max_r = cone_boundary_r * layer_profile_scale
 
-        # 带扰动的径向分布 - 使用更小的幂次让粒子分布更均匀饱满
-        r_scatter = math.pow(random.random(), 0.25)  # 从0.35减小到0.25
+        # 带扰动的径向分布 - 使用更小的幂次让内部粒子更密集
+        # 降低幂次让更多粒子聚集在内部
+        r_scatter = math.pow(random.random(), 0.15)  # 从0.25减小到0.15，让内部更密集
         r = current_layer_max_r * r_scatter
         turbulence_scale = random.uniform(0.9, 1.35)  # 稍微增大范围
         if random.random() < 0.08:  # 从5%增加到8%
@@ -248,18 +301,48 @@ def generate_ragged_tree(num_particles: int) -> List[Particle]:
         x = r * math.cos(theta)
         z = r * math.sin(theta)
 
-        # 颜色选择
+        # 颜色选择 - 从内到外由深到浅
         color = random.choice(Config.TREE_COLORS)
+        is_snow_particle = False  # 标记是否为雪花粒子
+
+        # 树顶的雪花
         if h_dist < 0.08:
-            color = Config.WHITE  # 明亮的顶部
+            color = Config.WHITE
+            is_snow_particle = True
+        # 内部较暗
         elif r_scatter < 0.4:
-            color = tuple(max(0, c - 50) for c in color)  # 较暗的内部
+            color = tuple(max(0, c - 50) for c in color)
+        # 中间层渐亮
+        elif r_scatter < 0.7:
+            color = tuple(min(255, int(c * 1.1)) for c in color)
+        # 外层更亮
+        else:
+            color = tuple(min(255, int(c * 1.2)) for c in color)
 
         # 大小变化
-        size = random.uniform(0.6, 2.0)
+        size = random.uniform(0.6, 2.0)  # 默认大小
+
+        # 最外层雪花效果（turbulence突出点）
         if turbulence_scale > 1.3:
-            size = random.uniform(2.0, 3.0)
-            color = Config.WHITE  # 高亮异常值
+            color = Config.WHITE
+            is_snow_particle = True
+            size = random.uniform(0.8, 1.8)  # 和下落雪花类似的大小
+
+        # 圣诞树本身的粒子（非雪花）根据亮度调整大小
+        if not is_snow_particle:
+            # 计算颜色亮度（感知亮度公式）
+            brightness = (color[0] * 0.299 + color[1] * 0.587 + color[2] * 0.114)
+
+            if brightness > 200:  # 偏亮的彩色粒子
+                # 20%概率变成大粒子
+                if random.random() < 0.2:
+                    size = random.uniform(2.5, 4.0)
+                else:
+                    size = random.uniform(1.2, 2.5)
+            elif brightness > 150:  # 中等亮度
+                size = random.uniform(0.8, 2.2)
+            else:  # 深色粒子
+                size = random.uniform(0.6, 1.8)
 
         particles.append(Particle(x, y, z, color, size))
 
@@ -374,6 +457,214 @@ def generate_pillow_heart(num_particles: int) -> List[Particle]:
     return particles
 
 # ============================================================================
+# 音量控制UI
+# ============================================================================
+
+class VolumeControl:
+    """科技感音量控制滑块"""
+
+    def __init__(self, x: int, y: int, width: int = 150, height: int = 40):
+        """
+        初始化音量控制器
+
+        Args:
+            x: 控件左上角X坐标
+            y: 控件左上角Y坐标
+            width: 滑块总宽度
+            height: 控件总高度
+        """
+        self.x = x
+        self.y = y
+        self.width = width
+        self.height = height
+
+        # 音量状态
+        self.volume = Config.DEFAULT_VOLUME
+        self.is_muted = False
+        self.pre_mute_volume = self.volume
+
+        # 滑块参数
+        self.slider_height = 4
+        self.slider_y = y + height // 2
+        self.knob_radius = 8
+
+        # 交互状态
+        self.is_dragging = False
+        self.is_hovering = False
+
+        # 图标区域（静音按钮）
+        self.icon_size = 24
+        self.icon_x = x - self.icon_size - 10
+        self.icon_y = y + (height - self.icon_size) // 2
+
+        # 颜色配置（科技蓝色调）
+        self.color_active = (100, 200, 255)      # 活跃蓝
+        self.color_inactive = (60, 70, 90)       # 暗灰
+        self.color_hover = (150, 220, 255)       # 亮蓝
+        self.color_bg = (30, 35, 45)             # 深色背景
+
+    def _get_knob_x(self) -> int:
+        """计算滑块旋钮的X坐标"""
+        return int(self.x + self.volume * self.width)
+
+    def _is_point_on_knob(self, px: int, py: int) -> bool:
+        """检查点是否在旋钮上"""
+        knob_x = self._get_knob_x()
+        dist = math.sqrt((px - knob_x)**2 + (py - self.slider_y)**2)
+        return dist <= self.knob_radius + 5
+
+    def _is_point_on_icon(self, px: int, py: int) -> bool:
+        """检查点是否在图标上"""
+        return (self.icon_x <= px <= self.icon_x + self.icon_size and
+                self.icon_y <= py <= self.icon_y + self.icon_size)
+
+    def handle_mouse_down(self, pos: Tuple[int, int]) -> bool:
+        """处理鼠标按下事件，返回是否处理了事件"""
+        px, py = pos
+
+        # 点击静音图标
+        if self._is_point_on_icon(px, py):
+            self.toggle_mute()
+            return True
+
+        # 点击滑块或旋钮
+        if self._is_point_on_knob(px, py) or (
+            self.x <= px <= self.x + self.width and
+            abs(py - self.slider_y) <= 10
+        ):
+            self.is_dragging = True
+            self._update_volume_from_mouse(px)
+            return True
+
+        return False
+
+    def handle_mouse_up(self) -> None:
+        """处理鼠标释放事件"""
+        self.is_dragging = False
+
+    def handle_mouse_motion(self, pos: Tuple[int, int]) -> None:
+        """处理鼠标移动事件"""
+        px, py = pos
+
+        # 更新悬停状态
+        self.is_hovering = (
+            self._is_point_on_knob(px, py) or
+            self._is_point_on_icon(px, py)
+        )
+
+        # 拖拽时更新音量
+        if self.is_dragging:
+            self._update_volume_from_mouse(px)
+
+    def _update_volume_from_mouse(self, mouse_x: int) -> None:
+        """根据鼠标X坐标更新音量"""
+        # 计算新音量
+        new_volume = (mouse_x - self.x) / self.width
+        new_volume = max(0.0, min(1.0, new_volume))
+
+        self.volume = new_volume
+
+        # 如果之前静音，拖动滑块则取消静音
+        if self.is_muted and new_volume > 0:
+            self.is_muted = False
+
+        # 应用音量
+        self._apply_volume()
+
+    def toggle_mute(self) -> None:
+        """切换静音状态"""
+        if self.is_muted:
+            # 取消静音，恢复之前的音量
+            self.is_muted = False
+            self.volume = self.pre_mute_volume if self.pre_mute_volume > 0 else 0.5
+        else:
+            # 静音，保存当前音量
+            self.is_muted = True
+            self.pre_mute_volume = self.volume
+
+        self._apply_volume()
+
+    def _apply_volume(self) -> None:
+        """应用音量设置到pygame混音器"""
+        actual_volume = 0.0 if self.is_muted else self.volume
+        pygame.mixer.music.set_volume(actual_volume)
+
+    def draw(self, surface: pygame.Surface) -> None:
+        """绘制音量控制UI"""
+        # 绘制背景容器（带透明度）
+        bg_surface = pygame.Surface((self.width + 60, self.height), pygame.SRCALPHA)
+        pygame.draw.rect(bg_surface, (*self.color_bg, 120),
+                        (0, 0, self.width + 60, self.height), border_radius=8)
+        surface.blit(bg_surface, (self.icon_x - 5, self.y))
+
+        # 绘制静音图标
+        self._draw_icon(surface)
+
+        # 绘制滑块轨道
+        track_color = self.color_inactive
+        pygame.draw.rect(surface, track_color,
+                        (self.x, self.slider_y - self.slider_height // 2,
+                         self.width, self.slider_height), border_radius=2)
+
+        # 绘制已填充部分（活跃颜色）
+        if not self.is_muted and self.volume > 0:
+            filled_width = int(self.width * self.volume)
+            pygame.draw.rect(surface, self.color_active,
+                           (self.x, self.slider_y - self.slider_height // 2,
+                            filled_width, self.slider_height), border_radius=2)
+
+        # 绘制旋钮
+        knob_x = self._get_knob_x()
+        knob_color = self.color_hover if self.is_hovering or self.is_dragging else self.color_active
+
+        # 外发光效果
+        if not self.is_muted:
+            glow_surface = pygame.Surface((self.knob_radius * 4, self.knob_radius * 4), pygame.SRCALPHA)
+            pygame.draw.circle(glow_surface, (*knob_color, 40),
+                             (self.knob_radius * 2, self.knob_radius * 2), self.knob_radius * 2)
+            surface.blit(glow_surface,
+                        (knob_x - self.knob_radius * 2, self.slider_y - self.knob_radius * 2))
+
+        # 旋钮本体
+        pygame.draw.circle(surface, knob_color, (knob_x, self.slider_y), self.knob_radius)
+        pygame.draw.circle(surface, (255, 255, 255), (knob_x, self.slider_y), self.knob_radius - 2)
+        pygame.draw.circle(surface, knob_color if not self.is_muted else self.color_inactive,
+                          (knob_x, self.slider_y), self.knob_radius - 4)
+
+    def _draw_icon(self, surface: pygame.Surface) -> None:
+        """绘制音量/静音图标（极简科技风格）"""
+        icon_color = self.color_active if not self.is_muted else self.color_inactive
+
+        # 扬声器主体（三角形）
+        speaker_points = [
+            (self.icon_x + 6, self.icon_y + 8),
+            (self.icon_x + 6, self.icon_y + 16),
+            (self.icon_x + 12, self.icon_y + 12)
+        ]
+        pygame.draw.polygon(surface, icon_color, speaker_points)
+
+        # 扬声器底座（矩形）
+        pygame.draw.rect(surface, icon_color,
+                        (self.icon_x + 2, self.icon_y + 10, 5, 4))
+
+        if self.is_muted:
+            # 静音：画斜线
+            pygame.draw.line(surface, (255, 80, 80),
+                           (self.icon_x + 2, self.icon_y + 20),
+                           (self.icon_x + 22, self.icon_y + 4), 3)
+        else:
+            # 非静音：画音波（三条弧线）
+            volume_level = int(self.volume * 3)
+            for i in range(volume_level):
+                arc_x = self.icon_x + 15 + i * 3
+                arc_radius = 4 + i * 2
+                # 简化为短线条表示音波
+                pygame.draw.line(surface, icon_color,
+                               (arc_x, self.icon_y + 12 - arc_radius // 2),
+                               (arc_x, self.icon_y + 12 + arc_radius // 2), 2)
+
+
+# ============================================================================
 # 文本渲染
 # ============================================================================
 
@@ -425,7 +716,7 @@ class MultiLineText:
 
         # 如果未指定则计算position_y
         if position_y is None:
-            self.position_y = Config.HEIGHT // 2
+            self.position_y = Config.VIRTUAL_HEIGHT // 2
         else:
             self.position_y = position_y
 
@@ -540,12 +831,21 @@ def main() -> None:
     rotation_controller = RotationController()
 
     # 创建多行文本渲染器（左对齐）
-    text_pos_x = int(Config.WIDTH * Config.TEXT_POSITION_X_RATIO)
+    # 使用虚拟分辨率进行布局
+    text_pos_x = int(Config.VIRTUAL_WIDTH * Config.TEXT_POSITION_X_RATIO)
     multi_line_text = MultiLineText(
         lines=Config.MESSAGE_LINES,
         position_x=text_pos_x,
         position_y=Config.TEXT_POSITION_Y,
         align="left"
+    )
+
+    # 创建音量控制（右上角位置）
+    volume_control = VolumeControl(
+        x=Config.VIRTUAL_WIDTH - 180,
+        y=20,
+        width=150,
+        height=40
     )
 
     start_ticks = pygame.time.get_ticks()
@@ -562,9 +862,24 @@ def main() -> None:
                 if event.key == pygame.K_ESCAPE:
                     running = False
             elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-                rotation_controller.handle_mouse_down(event.pos[0], current_time)
+                # 将实际屏幕坐标转换为虚拟坐标
+                virtual_x = int((event.pos[0] - offset_x) / (scaled_width / Config.VIRTUAL_WIDTH))
+                virtual_y = int((event.pos[1] - offset_y) / (scaled_height / Config.VIRTUAL_HEIGHT))
+                virtual_pos = (virtual_x, virtual_y)
+
+                # 先检查是否点击了音量控制
+                if not volume_control.handle_mouse_down(virtual_pos):
+                    # 如果没有点击音量控制，则处理旋转
+                    rotation_controller.handle_mouse_down(event.pos[0], current_time)
             elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+                volume_control.handle_mouse_up()
                 rotation_controller.handle_mouse_up(current_time)
+            elif event.type == pygame.MOUSEMOTION:
+                # 将实际屏幕坐标转换为虚拟坐标
+                virtual_x = int((event.pos[0] - offset_x) / (scaled_width / Config.VIRTUAL_WIDTH))
+                virtual_y = int((event.pos[1] - offset_y) / (scaled_height / Config.VIRTUAL_HEIGHT))
+                virtual_pos = (virtual_x, virtual_y)
+                volume_control.handle_mouse_motion(virtual_pos)
 
         # 更新旋转
         rotation_controller.update(current_time)
@@ -581,13 +896,21 @@ def main() -> None:
         all_particles = rotating_objects + snow_particles
         all_particles.sort(key=lambda p: p.z, reverse=True)
 
-        # 渲染
-        screen.fill(Config.BG_COLOR)
+        # 渲染到虚拟表面（固定1920x1080）
+        virtual_surface.fill(Config.BG_COLOR)
         for p in all_particles:
-            p.draw(screen, time_seconds)
+            p.draw(virtual_surface, time_seconds)
 
         # 绘制多行文本
-        multi_line_text.draw(screen)
+        multi_line_text.draw(virtual_surface)
+
+        # 绘制音量控制
+        volume_control.draw(virtual_surface)
+
+        # 缩放虚拟表面到实际屏幕
+        screen.fill((0, 0, 0))  # 黑色背景（letterbox）
+        scaled_surface = pygame.transform.scale(virtual_surface, (scaled_width, scaled_height))
+        screen.blit(scaled_surface, (offset_x, offset_y))
 
         pygame.display.flip()
         clock.tick(Config.FPS)

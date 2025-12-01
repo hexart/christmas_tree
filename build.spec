@@ -23,10 +23,10 @@ IS_SCREENSAVER = os.environ.get('BUILD_SCREENSAVER', '0') == '1' or '--screensav
 # 获取 pygame 路径
 pygame_path = os.path.dirname(pygame.__file__)
 
-# 根据模式选择入口文件
+# 根据模式选择入口文件和输出名称
 if IS_SCREENSAVER and IS_WINDOWS:
     entry_script = 'screensaver.py'
-    app_name = 'Christmas_Tree'
+    app_name = 'Christmas_Tree_Screensaver'
 else:
     entry_script = 'main.py'
     app_name = 'Christmas_Tree'
@@ -57,6 +57,7 @@ a = Analysis(
     binaries=[],
     datas=[
         (pygame_path, 'pygame'),  # 包含整个 pygame 目录
+        ('music.mp3', '.'),  # 包含音乐文件到根目录
     ],
     hiddenimports=hidden_imports,
     hookspath=[],
