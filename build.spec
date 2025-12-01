@@ -58,6 +58,8 @@ a = Analysis(
     datas=[
         (pygame_path, 'pygame'),  # 包含整个 pygame 目录
         ('music.mp3', '.'),  # 包含音乐文件到根目录
+        ('icon.png', '.'),  # 运行时加载的窗口图标
+        ('icons', 'icons'),  # 音量控制图标目录
     ],
     hiddenimports=hidden_imports,
     hookspath=[],
@@ -127,7 +129,7 @@ else:
         target_arch=None,
         codesign_identity=None,
         entitlements_file=None,
-        icon=icon.ico,
+        icon='icon.ico',
     )
 
     coll = COLLECT(

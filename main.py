@@ -4,12 +4,14 @@
 """
 import sys
 import os
-import pygame
 import math
 import random
-from typing import Tuple, List
+from typing import Tuple, List, Optional, Dict
 
-# Windows 高 DPI 支持
+import pygame
+
+
+# Windows 特定配置
 if sys.platform == 'win32':
     try:
         import ctypes
@@ -21,6 +23,13 @@ if sys.platform == 'win32':
             ctypes.windll.user32.SetProcessDPIAware()
         except Exception:
             pass  # 如果失败就使用默认行为
+
+    # 设置唯一的应用ID，让Windows任务栏正确识别图标
+    try:
+        myappid = 'hexiao.christmas_tree.app.1.0'
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
+    except Exception:
+        pass  # 如果失败就继续使用默认行为
 
 
 # ============================================================================
@@ -117,6 +126,33 @@ def get_resource_path(relative_path):
     except Exception:
         base_path = os.path.abspath(".")
     return os.path.join(base_path, relative_path)
+
+
+def set_window_icon():
+    """设置窗口图标"""
+    try:
+        icon_path = get_resource_path("icon.png")
+        icon_surface = pygame.image.load(icon_path).convert_alpha()
+        pygame.display.set_icon(icon_surface)
+        print(f"Window icon loaded: {icon_path}")
+    except Exception as error:
+        print(f"Failed to load window icon: {error}")
+
+
+set_window_icon()
+
+
+def load_png_icon(relative_path: str, size: int) -> Optional[pygame.Surface]:
+    """加载PNG图标并缩放为指定大小"""
+    icon_path = get_resource_path(relative_path)
+    try:
+        icon = pygame.image.load(icon_path).convert_alpha()
+        # 缩放到指定大小
+        icon = pygame.transform.smoothscale(icon, (size, size))
+        return icon
+    except Exception as error:
+        print(f"Failed to load PNG icon '{relative_path}': {error}")
+        return None
 
 try:
     music_path = get_resource_path(Config.MUSIC_FILE)
@@ -487,25 +523,31 @@ class VolumeControl:
         self.slider_height = 4
         self.slider_y = y + height // 2
         self.knob_radius = 8
+        self.track_left_padding = 10   # 缩短轨道左侧长度，避免靠近图标
+        self.track_right_padding = 18  # 缩短轨道右侧长度
+        self.track_width = max(10, self.width - self.track_left_padding - self.track_right_padding)
 
         # 交互状态
         self.is_dragging = False
         self.is_hovering = False
 
         # 图标区域（静音按钮）
-        self.icon_size = 24
+        self.icon_size = 20
         self.icon_x = x - self.icon_size - 10
         self.icon_y = y + (height - self.icon_size) // 2
+        self.icon_variants = self._load_icon_variants()
 
-        # 颜色配置（科技蓝色调）
-        self.color_active = (100, 200, 255)      # 活跃蓝
-        self.color_inactive = (60, 70, 90)       # 暗灰
-        self.color_hover = (150, 220, 255)       # 亮蓝
-        self.color_bg = (30, 35, 45)             # 深色背景
+        # 颜色配置（半透明浅灰风格）
+        self.color_active = (235, 235, 235)
+        self.color_inactive = (110, 115, 125)
+        self.color_hover = (255, 255, 255)
+        self.color_bg = (15, 18, 25)
+        self.color_border = (205, 205, 205)
 
     def _get_knob_x(self) -> int:
         """计算滑块旋钮的X坐标"""
-        return int(self.x + self.volume * self.width)
+        track_start = self.x + self.track_left_padding
+        return int(track_start + self.volume * self.track_width)
 
     def _is_point_on_knob(self, px: int, py: int) -> bool:
         """检查点是否在旋钮上"""
@@ -528,8 +570,9 @@ class VolumeControl:
             return True
 
         # 点击滑块或旋钮
+        track_start = self.x + self.track_left_padding
         if self._is_point_on_knob(px, py) or (
-            self.x <= px <= self.x + self.width and
+            track_start <= px <= track_start + self.track_width and
             abs(py - self.slider_y) <= 10
         ):
             self.is_dragging = True
@@ -559,14 +602,23 @@ class VolumeControl:
     def _update_volume_from_mouse(self, mouse_x: int) -> None:
         """根据鼠标X坐标更新音量"""
         # 计算新音量
-        new_volume = (mouse_x - self.x) / self.width
+        track_start = self.x + self.track_left_padding
+        track_end = track_start + self.track_width
+        clamped_x = max(track_start, min(mouse_x, track_end))
+        new_volume = (clamped_x - track_start) / self.track_width
         new_volume = max(0.0, min(1.0, new_volume))
 
+        previous_volume = self.volume
         self.volume = new_volume
 
-        # 如果之前静音，拖动滑块则取消静音
-        if self.is_muted and new_volume > 0:
+        if new_volume <= 0.001:
+            self.volume = 0.0
+            if previous_volume > 0:
+                self.pre_mute_volume = previous_volume
+            self.is_muted = True
+        else:
             self.is_muted = False
+            self.pre_mute_volume = self.volume
 
         # 应用音量
         self._apply_volume()
@@ -591,77 +643,107 @@ class VolumeControl:
 
     def draw(self, surface: pygame.Surface) -> None:
         """绘制音量控制UI"""
-        # 绘制背景容器（带透明度）
-        bg_surface = pygame.Surface((self.width + 60, self.height), pygame.SRCALPHA)
-        pygame.draw.rect(bg_surface, (*self.color_bg, 120),
-                        (0, 0, self.width + 60, self.height), border_radius=8)
-        surface.blit(bg_surface, (self.icon_x - 5, self.y))
+        container_width = self.width + self.icon_size + 30
+        container_surface = pygame.Surface((container_width, self.height), pygame.SRCALPHA)
+        container_rect = pygame.Rect(0, 0, container_width, self.height)
+        pygame.draw.rect(container_surface, (*self.color_bg, 100), container_rect, border_radius=12)
+        pygame.draw.rect(container_surface, (*self.color_border, 110), container_rect, width=1, border_radius=12)
+        surface.blit(container_surface, (self.icon_x - 15, self.y))
 
-        # 绘制静音图标
         self._draw_icon(surface)
 
-        # 绘制滑块轨道
-        track_color = self.color_inactive
-        pygame.draw.rect(surface, track_color,
-                        (self.x, self.slider_y - self.slider_height // 2,
-                         self.width, self.slider_height), border_radius=2)
+        track_surface = pygame.Surface((self.track_width, self.slider_height + 10), pygame.SRCALPHA)
+        track_top = (track_surface.get_height() - self.slider_height) // 2
+        track_rect = pygame.Rect(0, track_top, self.track_width, self.slider_height)
+        pygame.draw.rect(track_surface, (255, 255, 255, 25), track_rect, border_radius=4)
+        pygame.draw.rect(track_surface, (*self.color_border, 120), track_rect, width=1, border_radius=4)
 
-        # 绘制已填充部分（活跃颜色）
         if not self.is_muted and self.volume > 0:
-            filled_width = int(self.width * self.volume)
-            pygame.draw.rect(surface, self.color_active,
-                           (self.x, self.slider_y - self.slider_height // 2,
-                            filled_width, self.slider_height), border_radius=2)
+            filled_width = max(2, int(self.track_width * self.volume))
+            fill_rect = pygame.Rect(0, track_top, filled_width, self.slider_height)
+            pygame.draw.rect(track_surface, (255, 255, 255, 70), fill_rect, border_radius=4)
 
-        # 绘制旋钮
+        track_start = self.x + self.track_left_padding
+        surface.blit(track_surface, (track_start, self.slider_y - track_surface.get_height() // 2))
+
         knob_x = self._get_knob_x()
-        knob_color = self.color_hover if self.is_hovering or self.is_dragging else self.color_active
+        knob_surface_size = self.knob_radius * 4
+        knob_surface = pygame.Surface((knob_surface_size, knob_surface_size), pygame.SRCALPHA)
+        knob_center = (knob_surface_size // 2, knob_surface_size // 2)
+        glow_alpha = 70 if (self.is_hovering or self.is_dragging or not self.is_muted) else 35
+        pygame.draw.circle(knob_surface, (255, 255, 255, glow_alpha),
+                           knob_center, self.knob_radius + 4)
 
-        # 外发光效果
-        if not self.is_muted:
-            glow_surface = pygame.Surface((self.knob_radius * 4, self.knob_radius * 4), pygame.SRCALPHA)
-            pygame.draw.circle(glow_surface, (*knob_color, 40),
-                             (self.knob_radius * 2, self.knob_radius * 2), self.knob_radius * 2)
-            surface.blit(glow_surface,
-                        (knob_x - self.knob_radius * 2, self.slider_y - self.knob_radius * 2))
+        knob_fill = (255, 255, 255, 85) if not self.is_muted else (180, 180, 180, 40)
+        knob_border = (255, 255, 255, 140) if (self.is_hovering or self.is_dragging) else (*self.color_border, 140)
+        if self.is_muted:
+            knob_border = (*self.color_inactive, 120)
 
-        # 旋钮本体
-        pygame.draw.circle(surface, knob_color, (knob_x, self.slider_y), self.knob_radius)
-        pygame.draw.circle(surface, (255, 255, 255), (knob_x, self.slider_y), self.knob_radius - 2)
-        pygame.draw.circle(surface, knob_color if not self.is_muted else self.color_inactive,
-                          (knob_x, self.slider_y), self.knob_radius - 4)
+        pygame.draw.circle(knob_surface, knob_fill, knob_center, self.knob_radius)
+        pygame.draw.circle(knob_surface, knob_border, knob_center, self.knob_radius, width=2)
+        surface.blit(knob_surface, (knob_x - knob_surface_size // 2, self.slider_y - knob_surface_size // 2))
 
     def _draw_icon(self, surface: pygame.Surface) -> None:
-        """绘制音量/静音图标（极简科技风格）"""
-        icon_color = self.color_active if not self.is_muted else self.color_inactive
+        """绘制音量/静音图标"""
+        png_icon = self._get_png_icon_surface()
+        if png_icon:
+            surface.blit(png_icon, (self.icon_x, self.icon_y))
 
-        # 扬声器主体（三角形）
-        speaker_points = [
-            (self.icon_x + 6, self.icon_y + 8),
-            (self.icon_x + 6, self.icon_y + 16),
-            (self.icon_x + 12, self.icon_y + 12)
-        ]
-        pygame.draw.polygon(surface, icon_color, speaker_points)
+    def _get_png_icon_surface(self) -> Optional[pygame.Surface]:
+        """根据音量状态返回着色后的PNG图标"""
+        if not self.icon_variants:
+            return None
 
-        # 扬声器底座（矩形）
-        pygame.draw.rect(surface, icon_color,
-                        (self.icon_x + 2, self.icon_y + 10, 5, 4))
+        state = self._get_icon_state()
+        base_surface = self.icon_variants.get(state) or self.icon_variants.get('low')
+        if base_surface is None:
+            return None
 
+        tint_color = self.color_inactive if self.is_muted else self.color_active
+        alpha = 110 if self.is_muted else 200
+        if self.is_hovering or self.is_dragging:
+            alpha = min(255, alpha + 40)
+
+        return self._tint_icon_surface(base_surface, tint_color, alpha)
+
+    def _get_icon_state(self) -> str:
+        """根据当前音量状态选择图标"""
         if self.is_muted:
-            # 静音：画斜线
-            pygame.draw.line(surface, (255, 80, 80),
-                           (self.icon_x + 2, self.icon_y + 20),
-                           (self.icon_x + 22, self.icon_y + 4), 3)
-        else:
-            # 非静音：画音波（三条弧线）
-            volume_level = int(self.volume * 3)
-            for i in range(volume_level):
-                arc_x = self.icon_x + 15 + i * 3
-                arc_radius = 4 + i * 2
-                # 简化为短线条表示音波
-                pygame.draw.line(surface, icon_color,
-                               (arc_x, self.icon_y + 12 - arc_radius // 2),
-                               (arc_x, self.icon_y + 12 + arc_radius // 2), 2)
+            return 'muted'
+        if self.volume < 0.35:
+            return 'low'
+        if self.volume < 0.75:
+            return 'medium'
+        return 'high'
+
+    def _tint_icon_surface(self, base_surface: pygame.Surface,
+                           tint_color: Tuple[int, int, int], alpha: int) -> pygame.Surface:
+        """对PNG图标进行着色和透明度调整"""
+        icon = base_surface.copy()
+        icon.fill((*tint_color, 255), special_flags=pygame.BLEND_RGBA_MULT)
+
+        # 使用乘法混合缩放 alpha，避免 set_alpha 导致整个图块变成纯色方块
+        alpha_surface = pygame.Surface(icon.get_size(), pygame.SRCALPHA)
+        alpha_surface.fill((255, 255, 255, alpha))
+        icon.blit(alpha_surface, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+        return icon
+
+    def _load_icon_variants(self) -> Dict[str, pygame.Surface]:
+        """尝试加载不同状态的PNG音量图标"""
+        variant_files = {
+            'muted': 'icons/volume-x.png',
+            'low': 'icons/volume.png',
+            'medium': 'icons/volume-1.png',
+            'high': 'icons/volume-2.png',
+        }
+        variants: Dict[str, pygame.Surface] = {}
+
+        for state, file_path in variant_files.items():
+            icon_surface = load_png_icon(file_path, self.icon_size)
+            if icon_surface:
+                variants[state] = icon_surface
+
+        return variants
 
 
 # ============================================================================
