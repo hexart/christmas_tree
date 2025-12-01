@@ -45,24 +45,53 @@ class Config:
     HEIGHT = VIRTUAL_HEIGHT  # 实际窗口高度（全屏时会更新）
     FPS = 60
     WINDOW_TITLE = "Merry Christmas Tree"
-    AUTO_FULLSCREEN = True  # 设置为True可启动时自动全屏
+    AUTO_FULLSCREEN = False  # 设置为True可启动时自动全屏
     MAINTAIN_ASPECT_RATIO = True  # 保持宽高比，避免拉伸变形
 
     # 颜色定义
     BG_COLOR = (25, 28, 35)
     WHITE = (255, 255, 255)
-    TREE_COLORS = [
-        (255, 180, 190),  # 柔粉色
-        (255, 100, 150),  # 玫红色
-        (255, 215, 0),    # 金色
-        (255, 250, 240),  # 亮白色
-        (200, 240, 255),  # 冰蓝色
-        (220, 20, 60)     # 深红色
+    GOLD = (255, 215, 0)      # 金色
+    LIGHT_GOLD = (255, 230, 100)  # 浅金色
+    # 内部深色调色板（深粉紫色系）
+    TREE_COLORS_INNER = [
+        (115, 50, 95),    # 深粉紫色
+        (125, 45, 105),   # 深紫粉色
+        (135, 60, 100),   # 暗粉紫色
+        (105, 40, 85),    # 很深的紫粉色
+        (120, 48, 92),    # 深玫紫色
+        (130, 55, 105),   # 中深粉紫色
+        (95, 45, 110),    # 深紫色
+        (105, 50, 120),   # 深紫罗兰色
+        (85, 40, 100),    # 很深的紫色
+        (100, 45, 105),   # 暗紫色
+        (110, 55, 115),   # 深紫红色
+    ]
+    # 中间过渡色调色板
+    TREE_COLORS_MID = [
+        (160, 75, 125),   # 中粉紫色
+        (170, 85, 135),   # 玫瑰粉
+        (155, 70, 120),   # 柔玫瑰紫
+        (180, 80, 140),   # 亮一点的粉紫色
+        (190, 95, 145),   # 玫瑰粉红
+        (140, 70, 135),   # 中深紫色
+        (150, 75, 145),   # 紫罗兰色
+        (135, 65, 140),   # 深紫粉色
+        (145, 70, 150),   # 中紫色
+        (155, 80, 155),   # 紫红色
+    ]
+    # 外层亮色调色板
+    TREE_COLORS_OUTER = [
+        (200, 110, 155),  # 柔粉色
+        (210, 120, 165),  # 亮粉色
+        (220, 130, 170),  # 浅粉色
+        (235, 150, 180),  # 很浅的粉色
+        (245, 170, 195),  # 淡粉色
     ]
     GROUND_BASE_COLOR = (225, 225, 230)
 
     # 粒子数量
-    TREE_PARTICLES = 10000  # 从6000增加到10000
+    TREE_PARTICLES = 10000
     HEART_PARTICLES = 2000
     GROUND_PARTICLES = 12000
     SNOW_PARTICLES = 600
@@ -220,12 +249,13 @@ def load_font(size: int) -> pygame.font.Font:
 class Particle:
     """3D粒子类，包含位置、颜色和动画属性"""
 
-    def __init__(self, x: float, y: float, z: float, color: Tuple[int, int, int], size_base: float):
+    def __init__(self, x: float, y: float, z: float, color: Tuple[int, int, int], size_base: float, is_snow: bool = False):
         """初始化粒子的3D位置和视觉属性"""
         self.x, self.y, self.z = x, y, z
         self.orig_x, self.orig_y, self.orig_z = x, y, z
         self.color = color
         self.size_base = size_base
+        self.is_snow = is_snow  # 标记是否为雪花粒子
 
         self.flicker_speed = random.uniform(2.0, 5.0)
         self.flicker_offset = random.uniform(0, math.pi * 2)
@@ -280,7 +310,9 @@ class Particle:
 
         # 带闪烁效果的动画大小
         flicker = math.sin(time_input * self.flicker_speed + self.flicker_offset)
-        current_size = self.size_base * scale * (0.8 + 0.4 * flicker)
+        # 雪花粒子闪烁不明显（0.05），其他粒子正常闪烁（0.4）
+        flicker_amplitude = 0.05 if self.is_snow else 0.4
+        current_size = self.size_base * scale * (0.8 + flicker_amplitude * flicker)
 
         # 根据大小选择渲染方式
         if current_size <= 1.2:
@@ -334,53 +366,163 @@ def generate_ragged_tree(num_particles: int) -> List[Particle]:
 
         # 螺旋角度分布
         theta = random.uniform(0, math.pi * 2) + h_dist * math.pi * 12
+
+        # 添加树枝状的径向扰动
+        # 在特定角度方向上添加线性延伸，模拟树枝效果
+        num_branches = 8  # 每层的主要分支数
+        branch_angle = (theta % (math.pi * 2 / num_branches))
+        branch_proximity = abs(branch_angle - math.pi / num_branches)
+
+        # 如果粒子靠近某个分支方向，则向外延伸
+        if branch_proximity < 0.4:  # 在分支方向的容差范围内
+            branch_strength = 1.0 - (branch_proximity / 0.4)  # 越靠近分支中心，强度越大
+            # 沿径向添加延伸扰动
+            branch_extension = branch_strength * random.uniform(0, 25) * (1 - h_dist * 0.3)
+            r += branch_extension
+
+            # 添加一些垂直方向的微小偏移，让树枝更自然
+            if random.random() < 0.3:
+                y += random.uniform(-8, 8) * branch_strength
+
         x = r * math.cos(theta)
         z = r * math.sin(theta)
 
-        # 颜色选择 - 从内到外由深到浅
-        color = random.choice(Config.TREE_COLORS)
+        # 颜色选择 - 从内到外由深到浅（粉紫→粉色→白色雪花+金色）
         is_snow_particle = False  # 标记是否为雪花粒子
+        is_gold_particle = False  # 标记是否为金色粒子
 
         # 树顶的雪花
-        if h_dist < 0.08:
+        if h_dist < 0.06:
             color = Config.WHITE
             is_snow_particle = True
-        # 内部较暗
-        elif r_scatter < 0.4:
-            color = tuple(max(0, c - 50) for c in color)
-        # 中间层渐亮
-        elif r_scatter < 0.7:
-            color = tuple(min(255, int(c * 1.1)) for c in color)
-        # 外层更亮
+            size = random.uniform(0.5, 1.2)  # 小雪花
+        # 内部深色（粉紫色系）
+        elif r_scatter < 0.45:
+            color = random.choice(Config.TREE_COLORS_INNER)
+            # 最内部进一步加深
+            if r_scatter < 0.25:
+                color = tuple(max(0, int(c * 0.75)) for c in color)
+            elif r_scatter < 0.35:
+                color = tuple(max(0, int(c * 0.85)) for c in color)
+            # 在深色区域添加少量金色点缀
+            if random.random() < 0.015:
+                color = Config.LIGHT_GOLD
+                is_gold_particle = True
+            # 在深色区域添加少量白色雪花
+            elif random.random() < 0.03:
+                color = Config.WHITE
+                is_snow_particle = True
+                size = random.uniform(0.5, 1.0)  # 小雪花
+        # 中间层过渡色
+        elif r_scatter < 0.72:
+            color = random.choice(Config.TREE_COLORS_MID)
+            # 在中间层添加金色点缀
+            if random.random() < 0.03:
+                color = Config.GOLD if random.random() < 0.6 else Config.LIGHT_GOLD
+                is_gold_particle = True
+            # 在中间层添加白色雪花
+            elif random.random() < 0.06:
+                color = Config.WHITE
+                is_snow_particle = True
+                size = random.uniform(0.5, 1.2)  # 小雪花
+        # 外层亮色
         else:
-            color = tuple(min(255, int(c * 1.2)) for c in color)
+            # 外层白色雪花效果
+            if random.random() < 0.58:
+                color = Config.WHITE
+                is_snow_particle = True
+                size = random.uniform(0.4, 1.0)
+            # 外层金色装饰
+            elif random.random() < 0.04:
+                color = Config.GOLD
+                is_gold_particle = True
+            else:
+                color = random.choice(Config.TREE_COLORS_OUTER)
+                # 最外层稍微提亮
+                if r_scatter > 0.88:
+                    color = tuple(min(255, int(c * 1.12)) for c in color)
 
         # 大小变化
-        size = random.uniform(0.6, 2.0)  # 默认大小
+        if not is_snow_particle and not is_gold_particle:
+            size = random.uniform(0.6, 2.0)  # 默认大小
 
-        # 最外层雪花效果（turbulence突出点）
-        if turbulence_scale > 1.3:
-            color = Config.WHITE
-            is_snow_particle = True
-            size = random.uniform(0.8, 1.8)  # 和下落雪花类似的大小
+        # 最外层突出的雪花效果
+        if turbulence_scale > 1.4:
+            if random.random() < 0.88:  # 88%是白色雪花
+                color = Config.WHITE
+                is_snow_particle = True
+                size = random.uniform(0.5, 1.1)
+            else:  # 12%是金色点缀
+                color = Config.GOLD
+                is_gold_particle = True
+                size = random.uniform(1.2, 2.5)
 
-        # 圣诞树本身的粒子（非雪花）根据亮度调整大小
-        if not is_snow_particle:
-            # 计算颜色亮度（感知亮度公式）
+        # 根据粒子类型调整大小
+        if is_gold_particle:
+            # 金色粒子偏大，作为装饰亮点
+            if random.random() < 0.3:  # 30%是大金色粒子
+                size = random.uniform(2.8, 4.2)
+            else:
+                size = random.uniform(1.8, 3.0)
+        elif not is_snow_particle:
+            # 其他彩色粒子根据亮度调整大小
             brightness = (color[0] * 0.299 + color[1] * 0.587 + color[2] * 0.114)
 
-            if brightness > 200:  # 偏亮的彩色粒子
+            if brightness > 180:  # 偏亮的彩色粒子
                 # 20%概率变成大粒子
                 if random.random() < 0.2:
                     size = random.uniform(2.5, 4.0)
                 else:
                     size = random.uniform(1.2, 2.5)
-            elif brightness > 150:  # 中等亮度
+            elif brightness > 120:  # 中等亮度
                 size = random.uniform(0.8, 2.2)
             else:  # 深色粒子
                 size = random.uniform(0.6, 1.8)
 
-        particles.append(Particle(x, y, z, color, size))
+        particles.append(Particle(x, y, z, color, size, is_snow=is_snow_particle))
+
+    # 在最外层增加额外的白色雪花层，模拟落在树上的雪
+    num_snow_layer = int(num_particles * 0.4)  # 额外增加40%的雪花粒子
+    for i in range(num_snow_layer):
+        # 垂直分布
+        h_norm = random.random()
+        h_dist = math.pow(h_norm, 0.75)
+        y = -tree_height * 0.58 + h_dist * tree_height
+        y += random.uniform(-6, 6)
+
+        # 在树的最外层轮廓处生成雪花
+        cone_boundary_r = max_base_radius * h_dist
+        wave_factor = abs(math.sin(h_dist * math.pi * num_layers))
+        layer_profile_scale = 0.35 + 0.65 * wave_factor
+        current_layer_max_r = cone_boundary_r * layer_profile_scale
+
+        # 雪花在最外层表面
+        r_position = random.uniform(0.95, 1.15)
+        r = current_layer_max_r * r_position
+
+        # 树顶更窄
+        if h_dist < 0.06:
+            r = random.uniform(7, 12 * (1 - h_dist))
+
+        # 角度分布
+        theta = random.uniform(0, math.pi * 2) + h_dist * math.pi * 12
+
+        # 添加树枝状扰动
+        branch_angle = (theta % (math.pi * 2 / num_branches))
+        branch_proximity = abs(branch_angle - math.pi / num_branches)
+        if branch_proximity < 0.4:
+            branch_strength = 1.0 - (branch_proximity / 0.4)
+            branch_extension = branch_strength * random.uniform(0, 30) * (1 - h_dist * 0.3)
+            r += branch_extension
+            if random.random() < 0.4:
+                y += random.uniform(-10, 10) * branch_strength
+
+        x = r * math.cos(theta)
+        z = r * math.sin(theta)
+
+        # 白色雪花粒子
+        snow_size = random.uniform(0.8, 2.0)
+        particles.append(Particle(x, y, z, Config.WHITE, snow_size, is_snow=True))
 
     return particles
 
@@ -446,8 +588,7 @@ def generate_pillow_heart(num_particles: int) -> List[Particle]:
         x0 = 16 * math.sin(t)**3
         y0 = 13 * math.cos(t) - 5 * math.cos(2*t) - 2 * math.cos(3*t) - math.cos(4*t)
 
-        # 更平滑的径向填充以获得更饱满的外观
-        # 使用0.2次方代替0.3使其更饱满
+        # 径向填充
         r = math.pow(random.random(), 0.2)
 
         # 缩放位置
@@ -455,17 +596,14 @@ def generate_pillow_heart(num_particles: int) -> List[Particle]:
         p_x = x0 * scale
         p_y = -y0 * scale + y_offset
 
-        # 3D厚度实现"蓬松"效果 - 增加以获得更圆润的边缘
-        max_thickness = 16.0  # 从13.0增加
-        # 使用更平滑的衰减以获得更圆润的边缘
+        # 3D厚度实现蓬松效果
+        max_thickness = 16.0
         z_thickness = max_thickness * math.pow(math.cos(r * math.pi / 2), 0.7)
         z_side = 1 if random.random() > 0.5 else -1
-        # 减少变化以获得更光滑的表面
         p_z = z_thickness * z_side * random.uniform(0.9, 1.1)
 
-        # 添加边缘平滑：边缘附近更多粒子
+        # 边缘平滑处理
         if r > 0.85:
-            # 在边缘周围创建额外的平滑粒子
             edge_offset = random.uniform(-0.5, 0.5)
             p_x += edge_offset * math.cos(t)
             p_y += edge_offset * math.sin(t)
@@ -473,22 +611,29 @@ def generate_pillow_heart(num_particles: int) -> List[Particle]:
         # 颜色渐变（明亮的中心，粉色的边缘）+ 金色闪光点
         sparkle_chance = random.random()
 
-        if sparkle_chance < 0.03:  # 3%的金色大亮点
-            color = (255, 215, 0)  # 金色
-            size = random.uniform(2.5, 3.5)  # 更大
-        elif sparkle_chance < 0.08:  # 额外5%的金色小亮点
-            color = (255, 223, 100)  # 淡金色
-            size = random.uniform(1.8, 2.3)
-        elif r < 0.4:
-            color = (255, 230, 230)  # 几乎白色的中心
-            size = random.uniform(1.0, 1.6)  # 稍大的粒子以获得更饱满的外观
-        else:
-            color = (255, 80, 110)   # 明亮的粉色边缘
-            size = random.uniform(1.0, 1.6)
-            if random.random() < 0.15:
-                color = Config.WHITE  # 随机亮点
+        is_snow_heart = False
 
-        particles.append(Particle(p_x, p_y, p_z, color, size))
+        if sparkle_chance < 0.02:  # 金色大亮点
+            color = Config.GOLD
+            size = random.uniform(2.5, 3.8)
+        elif sparkle_chance < 0.03:  # 金色小亮点
+            color = Config.LIGHT_GOLD
+            size = random.uniform(1.8, 2.5)
+        elif r < 0.35:
+            color = (255, 230, 230)  # 白色中心
+            size = random.uniform(1.0, 1.6)
+            is_snow_heart = True
+        else:
+            color = (255, 80, 110)  # 粉色边缘
+            # 白色亮点
+            if random.random() < 0.25:
+                color = Config.WHITE  # 随机亮点
+                size = random.uniform(0.6, 1.2)  # 更小的白色粒子
+                is_snow_heart = True
+            else:
+                size = random.uniform(1.0, 1.6)
+
+        particles.append(Particle(p_x, p_y, p_z, color, size, is_snow=is_snow_heart))
 
     return particles
 
