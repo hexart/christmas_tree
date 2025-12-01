@@ -106,7 +106,7 @@ if IS_MACOS and not IS_SCREENSAVER:
     app = BUNDLE(
         coll,
         name=f'{app_name}.app',
-        icon=None,
+        icon='icon.icns',
         bundle_identifier=None,
     )
 else:
@@ -127,7 +127,7 @@ else:
         target_arch=None,
         codesign_identity=None,
         entitlements_file=None,
-        icon=None,  # 可添加图标：icon='icon.ico'
+        icon=icon.ico,
     )
 
     coll = COLLECT(
