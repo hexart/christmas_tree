@@ -45,7 +45,7 @@ class Config:
     HEIGHT = VIRTUAL_HEIGHT  # 实际窗口高度（全屏时会更新）
     FPS = 60
     WINDOW_TITLE = "Merry Christmas Tree"
-    AUTO_FULLSCREEN = False  # 设置为True可启动时自动全屏
+    AUTO_FULLSCREEN = True  # 设置为True可启动时自动全屏
     MAINTAIN_ASPECT_RATIO = True  # 保持宽高比，避免拉伸变形
 
     # 颜色定义
@@ -336,6 +336,7 @@ def generate_ragged_tree(num_particles: int) -> List[Particle]:
     tree_height = 700
     max_base_radius = 260
     num_layers = 9
+    num_branches = 8  # 每层的主要分支数
 
     for i in range(num_particles):
         # 垂直分布（从底到顶）
@@ -369,7 +370,6 @@ def generate_ragged_tree(num_particles: int) -> List[Particle]:
 
         # 添加树枝状的径向扰动
         # 在特定角度方向上添加线性延伸，模拟树枝效果
-        num_branches = 8  # 每层的主要分支数
         branch_angle = (theta % (math.pi * 2 / num_branches))
         branch_proximity = abs(branch_angle - math.pi / num_branches)
 
@@ -388,8 +388,10 @@ def generate_ragged_tree(num_particles: int) -> List[Particle]:
         z = r * math.sin(theta)
 
         # 颜色选择 - 从内到外由深到浅（粉紫→粉色→白色雪花+金色）
-        is_snow_particle = False  # 标记是否为雪花粒子
-        is_gold_particle = False  # 标记是否为金色粒子
+        # 大小和类型初始化
+        size = random.uniform(0.6, 2.0)
+        is_snow_particle = False
+        is_gold_particle = False
 
         # 树顶的雪花
         if h_dist < 0.06:
@@ -441,10 +443,6 @@ def generate_ragged_tree(num_particles: int) -> List[Particle]:
                 # 最外层稍微提亮
                 if r_scatter > 0.88:
                     color = tuple(min(255, int(c * 1.12)) for c in color)
-
-        # 大小变化
-        if not is_snow_particle and not is_gold_particle:
-            size = random.uniform(0.6, 2.0)  # 默认大小
 
         # 最外层突出的雪花效果
         if turbulence_scale > 2.8:
@@ -570,9 +568,9 @@ def generate_snow(num_particles: int) -> List[Particle]:
         x = random.uniform(-500, 1200)
         y = random.uniform(-500, 500)
         z = random.uniform(-500, 1200)
-        p = Particle(x, y, z, Config.WHITE, random.uniform(0.8, 1.8))
-        p.fall_speed = random.uniform(0.2, 1.8)
-        particles.append(p)
+        particle = Particle(x, y, z, Config.WHITE, random.uniform(0.8, 1.8))
+        particle.fall_speed = random.uniform(0.2, 1.8)
+        particles.append(particle)
     return particles
 
 
@@ -861,7 +859,8 @@ class VolumeControl:
             return 'medium'
         return 'high'
 
-    def _tint_icon_surface(self, base_surface: pygame.Surface,
+    @staticmethod
+    def _tint_icon_surface(base_surface: pygame.Surface,
                            tint_color: Tuple[int, int, int], alpha: int) -> pygame.Surface:
         """对PNG图标进行着色和透明度调整"""
         icon = base_surface.copy()
@@ -942,10 +941,7 @@ class MultiLineText:
         self.total_height += line_spacing * (len(lines) - 1)
 
         # 如果未指定则计算position_y
-        if position_y is None:
-            self.position_y = Config.VIRTUAL_HEIGHT // 2
-        else:
-            self.position_y = position_y
+        self.position_y = Config.VIRTUAL_HEIGHT // 2 if position_y is None else position_y
 
     def draw(self, surface: pygame.Surface) -> None:
         """绘制所有文本行及其阴影"""
@@ -1090,8 +1086,8 @@ def main() -> None:
                     running = False
             elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 # 将实际屏幕坐标转换为虚拟坐标
-                virtual_x = int((event.pos[0] - offset_x) / (scaled_width / Config.VIRTUAL_WIDTH))
-                virtual_y = int((event.pos[1] - offset_y) / (scaled_height / Config.VIRTUAL_HEIGHT))
+                virtual_x = int((event.pos[0] - offset_x) / scaled_width * Config.VIRTUAL_WIDTH)
+                virtual_y = int((event.pos[1] - offset_y) / scaled_height * Config.VIRTUAL_HEIGHT)
                 virtual_pos = (virtual_x, virtual_y)
 
                 # 先检查是否点击了音量控制
@@ -1103,8 +1099,8 @@ def main() -> None:
                 rotation_controller.handle_mouse_up(current_time)
             elif event.type == pygame.MOUSEMOTION:
                 # 将实际屏幕坐标转换为虚拟坐标
-                virtual_x = int((event.pos[0] - offset_x) / (scaled_width / Config.VIRTUAL_WIDTH))
-                virtual_y = int((event.pos[1] - offset_y) / (scaled_height / Config.VIRTUAL_HEIGHT))
+                virtual_x = int((event.pos[0] - offset_x) / scaled_width * Config.VIRTUAL_WIDTH)
+                virtual_y = int((event.pos[1] - offset_y) / scaled_height * Config.VIRTUAL_HEIGHT)
                 virtual_pos = (virtual_x, virtual_y)
                 volume_control.handle_mouse_motion(virtual_pos)
 
